@@ -1,0 +1,4 @@
+---
+# defaults file for pre_install_validation
+
+proxy_env: { }

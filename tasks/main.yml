@@ -1,18 +1,103 @@
 # Assumes that prereqs have been met and that binaries are available.
+    #- name: get ec2 facts
+    #  ec2_remote_facts:
+    #    region: '{{ec2_region}}'
+    #    filters:
+    #      instance-id: '{{hostvars[inventory_hostname].instance_id}}'
+    #  register: ec2_facts
 
-    - name: rpctest (1:1)
-      shell: 'cluster-validation/pre-install/rpctest -client +10000 {{hostvars[item].ansible_fqdn}} | tail -1 | sed -e "s/[ :/A-Za-z#]//g"'
-      with_items: "{{groups.cluster}}"
-      when: "'{{inventory_hostname}}' != '{{item}}'"
+    - name: get instance info
+      local_action: command aws ec2 describe-instances --instance-ids '{{hostvars[inventory_hostname].instance_id}}'
+      register: instance
 
-    - name: rpctest (1:n)
-      shell: 'cluster-validation/pre-install/rpctest -client +10000 {% for host in groups.cluster %}{% if "{{host}}" != "{{inventory_hostname}}" %}{{hostvars[host].ansible_fqdn}}{% if not loop.last %},{% endif %}{% endif %}{% endfor %} | tail -1 | sed -e "s/[ :/A-Za-z#]//g"'
+    - name: register current time
+      local_action:
+        module: set_fact
+        time_now: "{{ansible_date_time.time|regex_replace(':', '_')}}"
+      run_once: yes
 
-    - name: run fio on mapr disks
-      become: True
-      become_user: root
-      command: ./fio --name=job1 --size 4g --bs 1m --filename {{mapr_disks|join(':')}} --rw=write --name=job2 --size 4g --bs 1m --filename {{mapr_disks|join(':')}}  --output-format=json
-      when: destructive_tests_ok is defined and destructive_tests_ok
+    - name: create paths for results
+      local_action:
+        module: file
+        state: directory
+        path: validation_results/{{item}}/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}
+      with_items:
+        - triad
+        - fio
+        - rpctest_1_1
+        - rpctest_1_n
+        - instances
+
+    - name: write instance descriptions
+      local_action:
+        module: copy
+        content: '{{instance.stdout}}'
+        dest:  validation_results/instances/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
+
+    - name: write triad script
+      template:
+        src: triad.sh.j2
+        dest: ./triad.sh
+        mode: 0755
 
     - name: Triad memory throughput test
-      shell: "cluster-validation/pre-install/memory-test.sh | egrep '^Triad' | awk '{ printf \"{ \"triad_throughput_MB\": %f }\", $2  }'"
+      command: ./triad.sh
+      register: triad
+
+    - name: save triad results
+      local_action:
+        module: copy
+        content: '{{triad.stdout}}'
+        dest: validation_results/triad/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
+
+    - name: rpctest (1:1)
+      shell: 'cluster-validation/pre-install/rpctest -client +3000 {{hostvars[item].ansible_fqdn}} | tail -1 | sed -e "s/[ :/A-Za-z#]//g" | xargs -I_ echo {{hostvars[item].ansible_fqdn}},_'
+      with_items: "{{groups.cluster}}"
+      when: "'{{inventory_hostname}}' != '{{item}}'"
+      register: rpctest_1_1
+
+    - name: save rpctest_1_1 results
+      local_action:
+        module: lineinfile
+        create: yes
+        line: '{{item.stdout}}'
+        dest: validation_results/rpctest_1_1/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.csv
+      when: "item.stdout is defined"
+      with_items:
+        - '{{rpctest_1_1.results}}'
+
+    - name: rpctest (1:n)
+      shell: 'cluster-validation/pre-install/rpctest -client +3000 {% for host in groups.cluster %}{% if "{{host}}" != "{{inventory_hostname}}" %}{{hostvars[host].ansible_fqdn}}{% if not loop.last %},{% endif %}{% endif %}{% endfor %} | tail -1 | sed -e "s/[ :/A-Za-z#]//g"'
+      register: rpctest_1_n
+
+    - name: save rpctest_1_n results
+      local_action:
+        module: copy
+        content: '{{rpctest_1_n.stdout}}'
+        dest: validation_results/rpctest_1_n/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.csv
+
+    - name: run fio test on mapr disks
+      become: True
+      become_user: root
+      shell: ./fio {% if destructive_tests_ok is defined and destructive_tests_ok %}--name=write --size {{ansible_memory_mb.real.total}}m --bs 1m --filename {{mapr_disks|join(':')}} --iodepth 16 --rw=write{% endif %}  --name read --size {{ansible_memory_mb.real.total}}m --bs 1m --filename {{mapr_disks|join(':')}} --iodepth 16 --rw=read --output-format=json | egrep -v '^write'
+      when: destructive_tests_ok is defined and destructive_tests_ok
+      register: fio
+
+    - name: save fio results
+      local_action:
+        module: copy
+        content: '{{fio.stdout}}'
+        dest: validation_results/fio/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
+
+    #- name: run fio read test on mapr disks
+    #  become: True
+    #  become_user: root
+    #  command: ./fio --name=read --size 10g --bs 1m --filename {{mapr_disks|join(':')}} --rw=read --output-format=json
+    #  register: fio_read
+
+    #- name: save fio_read results
+    #  local_action:
+    #    module: copy
+    #    content: '{{fio_read.stdout}}'
+    #    dest: validation_results/fio_read/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
+

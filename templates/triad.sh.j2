@@ -1,0 +1,3 @@
+#!/bin/sh
+
+cluster-validation/pre-install/memory-test.sh | egrep '^Triad' | awk '{ printf "{\"triad_throughput_MB\":%f }", $2  }'

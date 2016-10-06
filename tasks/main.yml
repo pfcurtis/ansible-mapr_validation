@@ -81,6 +81,10 @@
         content: '{{fio.stdout}}'
         dest: validation_results/fio/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
 
+    - name: push results to s3
+      local_action: command aws s3 sync validation_results s3://vgonzalez/validation_results
+      run_once: yes
+
     #- name: run fio read test on mapr disks
     #  become: True
     #  become_user: root

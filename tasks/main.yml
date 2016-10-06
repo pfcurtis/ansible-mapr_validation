@@ -1,11 +1,4 @@
 # Assumes that prereqs have been met and that binaries are available.
-    #- name: get ec2 facts
-    #  ec2_remote_facts:
-    #    region: '{{ec2_region}}'
-    #    filters:
-    #      instance-id: '{{hostvars[inventory_hostname].instance_id}}'
-    #  register: ec2_facts
-
     - name: get instance info
       local_action: command aws ec2 describe-instances --instance-ids '{{hostvars[inventory_hostname].instance_id}}'
       register: instance
@@ -80,7 +73,6 @@
       become: True
       become_user: root
       shell: ./fio {% if destructive_tests_ok is defined and destructive_tests_ok %}--name=write --size {{ansible_memory_mb.real.total}}m --bs 1m --filename {{mapr_disks|join(':')}} --iodepth 16 --rw=write{% endif %}  --name read --size {{ansible_memory_mb.real.total}}m --bs 1m --filename {{mapr_disks|join(':')}} --iodepth 16 --rw=read --output-format=json | egrep -v '^write'
-      when: destructive_tests_ok is defined and destructive_tests_ok
       register: fio
 
     - name: save fio results

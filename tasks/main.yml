@@ -85,15 +85,4 @@
       local_action: command aws s3 sync validation_results s3://vgonzalez/validation_results
       run_once: yes
 
-    #- name: run fio read test on mapr disks
-    #  become: True
-    #  become_user: root
-    #  command: ./fio --name=read --size 10g --bs 1m --filename {{mapr_disks|join(':')}} --rw=read --output-format=json
-    #  register: fio_read
-
-    #- name: save fio_read results
-    #  local_action:
-    #    module: copy
-    #    content: '{{fio_read.stdout}}'
-    #    dest: validation_results/fio_read/host={{ansible_fqdn}}/year={{ansible_date_time.year}}/month={{ansible_date_time.month}}/day={{ansible_date_time.day}}/time={{time_now}}/result.json
 

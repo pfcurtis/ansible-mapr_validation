@@ -1,4 +1,30 @@
 # Assumes that prereqs have been met and that binaries are available.
+    - name: install bind-utils to test DNS resolution
+      become: True
+      become_user: root
+      package: name=bind-utils state=present
+
+    - name: check forward (A) resolution
+      command: dig +short -t A {{ansible_fqdn}}
+      register: a_record
+
+    - name: check reverse (PTR) resolution
+      command: dig +short -t PTR -x {{ansible_default_ipv4.address}}
+      register: ptr_record
+
+    - debug: var=a_record.stdout
+    - debug: var=ptr_record.stdout
+
+    - name: check that A record matches IP
+      assert:
+        that: '"{{a_record.stdout}}" == "{{ansible_default_ipv4.address}}"'
+        msg: "DNS A record does not match IP address."
+
+    - name: check that PTR matches fqdn
+      assert:
+        that: '"{{ptr_record.stdout}}" == "{{ansible_fqdn}}."'
+        msg: "DNS PTR record does not match hostname."
+
     - name: get instance info
       local_action: command aws ec2 describe-instances --instance-ids '{{hostvars[inventory_hostname].instance_id}}'
       register: instance
